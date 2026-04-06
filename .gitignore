@@ -1,0 +1,92 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.Python
+.ruff_cache/
+.tox/
+.nox/
+.coverage.*
+
+# Node / frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.turbo/
+frontend/.eslintcache
+frontend/vite.svg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# VS Code
+.vscode/settings.json
+.vscode/*.log
+
+# Environment variables
+.env
+
+# TalkingBI runtime data
+data/uploads/*
+data/chroma/*
+data/cache/*.log
+data/cache/*.json
+data/cache/voice/*
+data/cache/whisper/*
+data/cache/llm/*
+data/sessions/*.db
+!data/uploads/.gitkeep
+!data/chroma/.gitkeep
+!data/cache/.gitkeep
+!data/cache/voice/.gitkeep
+!data/cache/whisper/.gitkeep
+!data/cache/llm/.gitkeep
+
+# Knowledge base (auto-generated)
+data/knowledge_base/*
+!data/knowledge_base/.gitkeep
+
+# SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Pytest
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# MyPy
+.mypy_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+tests/api/tempCodeRunnerFile.py
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Logs
+*.log
+logs/
+
+# Misc local artifacts
+.DS_Store?
+*.tmp
+*.temp

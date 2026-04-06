@@ -1,0 +1,60 @@
+version: "3.9"
+
+services:
+  # ----------------------------------------------------------------
+  # TalkingBI FastAPI backend
+  # ----------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: talkingbi_api
+    ports:
+      - "8000:8000"
+    environment:
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+    env_file:
+      - .env          # Must contain OPENROUTER_API_KEY
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  # ----------------------------------------------------------------
+  # React frontend (nginx)
+  # ----------------------------------------------------------------
+  frontend:
+    build: ./frontend
+    container_name: talkingbi_frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+    environment:
+      - VITE_API_URL=http://api:8000
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------
+  # Ollama (optional — only needed if LLM_PROVIDER=ollama in .env)
+  # Uncomment this block to enable local inference via Ollama.
+  # ----------------------------------------------------------------
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: talkingbi_ollama
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   # GPU passthrough (NVIDIA) — remove if CPU only
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: all
+  #             capabilities: [gpu]
+  #   restart: unless-stopped
+
+# volumes:
+#   ollama_data:
