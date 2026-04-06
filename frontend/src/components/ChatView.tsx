@@ -17,6 +17,7 @@ import { sendChat, getSessionMessages } from "@/lib/api";
 import { useSession } from "@/hooks/use-session";
 import { useVoiceAgent } from "@/hooks/useVoiceAgent";
 import InteractiveChart from "@/components/InteractiveChart";
+import KpiCoverageCard from "@/components/KpiCoverageCard";
 import {
   Collapsible,
   CollapsibleContent,
@@ -31,6 +32,7 @@ import type {
   HybridResponse,
   Insight,
   ChartData,
+  KpiCoverageInfo,
 } from "@/types/api";
 import { MicButton } from "@/components/voice/MicButton";
 import { VoiceTranscriptBubble } from "@/components/voice/VoiceTranscriptBubble";
@@ -61,10 +63,11 @@ const PROGRESS_STEPS = ["Routing", "Processing", "Generating", "Done"];
 // ─── Message Types ────────────────────────────────────────────────────────────
 
 interface BaseMessage { id: number; role: "user" | "ai"; }
-interface TextMessage extends BaseMessage { kind: "text"; content: string; }
+interface TextMessage extends BaseMessage { kind: "text"; content: string; kpiCoverage?: KpiCoverageInfo; }
 interface SQLMessage extends BaseMessage {
   kind: "sql"; summary: string; columns: string[];
   rows: unknown[][]; rowsReturned: number;
+  kpiCoverage?: KpiCoverageInfo;
 }
 interface ChartMessage extends BaseMessage {
   kind: "chart";
@@ -74,19 +77,23 @@ interface ChartMessage extends BaseMessage {
   dataPoints: number;
   code: string;
   chartData?: ChartData;
+  kpiCoverage?: KpiCoverageInfo;
 }
 interface InsightMessage extends BaseMessage {
   kind: "insight"; summary: string; goal: string; insights: Insight[];
+  kpiCoverage?: KpiCoverageInfo;
 }
 interface DataPrepMessage extends BaseMessage {
   kind: "data_prep"; pipeline: string[];
   shape: [number, number]; preview: Record<string, unknown>[];
+  kpiCoverage?: KpiCoverageInfo;
 }
 interface HybridMessage extends BaseMessage {
   kind: "hybrid";
   sqlData?: SQLResultResponse;
   chart?: ChartResultResponse;
   insightTexts?: string[];
+  kpiCoverage?: KpiCoverageInfo;
 }
 
 type Message =
@@ -113,10 +120,22 @@ function formatSqlSummary(response: SQLResultResponse): string {
   return `I found ${response.rows_returned.toLocaleString()} rows. Here are the top results.`;
 }
 
+function extractKpiCoverage(response: ChatResponse): KpiCoverageInfo | undefined {
+  const direct = (response as { kpi_coverage?: KpiCoverageInfo }).kpi_coverage;
+  if (direct) return direct;
+
+  const hybrid = response as HybridResponse;
+  if (hybrid.data?.kpi_coverage) return hybrid.data.kpi_coverage;
+  if (hybrid.chart?.kpi_coverage) return hybrid.chart.kpi_coverage;
+
+  return undefined;
+}
+
 // ─── Response → Message builder ───────────────────────────────────────────────
 
 function buildAIMessage(response: ChatResponse): Message {
   const base = { id: Date.now() + 1, role: "ai" as const };
+  const kpiCoverage = extractKpiCoverage(response);
   switch (response.type) {
     case "sql_result":
     case "sql": {
@@ -125,6 +144,7 @@ function buildAIMessage(response: ChatResponse): Message {
         ...base, kind: "sql", summary: formatSqlSummary(r),
         columns: r.data?.columns ?? [], rows: r.data?.rows ?? [],
         rowsReturned: r.rows_returned,
+        kpiCoverage,
       };
     }
     case "chart": {
@@ -137,11 +157,12 @@ function buildAIMessage(response: ChatResponse): Message {
         dataPoints: r.data_points,
         code: r.code ?? "",
         chartData: r.chart_data,
+        kpiCoverage,
       };
     }
     case "insights": {
       const r = response as InsightsResponse;
-      return { ...base, kind: "insight", summary: r.summary, goal: r.goal, insights: r.insights };
+      return { ...base, kind: "insight", summary: r.summary, goal: r.goal, insights: r.insights, kpiCoverage };
     }
     case "data_prep": {
       const r = response as DataPrepResponse;
@@ -150,11 +171,12 @@ function buildAIMessage(response: ChatResponse): Message {
         pipeline: r.pipeline ?? [],
         shape: r.shape as [number, number],
         preview: r.preview ?? [],
+        kpiCoverage,
       };
     }
     case "hybrid": {
       const r = response as HybridResponse;
-      return { ...base, kind: "hybrid", sqlData: r.data, chart: r.chart, insightTexts: r.insights };
+      return { ...base, kind: "hybrid", sqlData: r.data, chart: r.chart, insightTexts: r.insights, kpiCoverage };
     }
     case "error":
       return { ...base, kind: "text", content: `⚠️ ${mapError(response.error ?? "Unknown error")}` };
@@ -162,7 +184,7 @@ function buildAIMessage(response: ChatResponse): Message {
       const resp = (response as { response?: string; answer?: string; summary?: string }).response
         ?? (response as { answer?: string }).answer
         ?? (response as { summary?: string }).summary;
-      return { ...base, kind: "text", content: resp ?? "Done." };
+      return { ...base, kind: "text", content: resp ?? "Done.", kpiCoverage };
     }
   }
 }
@@ -399,6 +421,8 @@ function MessageBubble({ msg }: { msg: Message }) {
     content = <span className="whitespace-pre-wrap">{(msg as TextMessage).content}</span>;
   }
 
+  const kpiCoverage = msg.kpiCoverage;
+
   // Chart messages get a wider bubble so the chart looks good
   const isChartMsg = msg.kind === "chart" || msg.kind === "hybrid";
 
@@ -419,6 +443,11 @@ function MessageBubble({ msg }: { msg: Message }) {
         }`}
       >
         {content}
+        {kpiCoverage && (
+          <div className="mt-4">
+            <KpiCoverageCard coverage={kpiCoverage} />
+          </div>
+        )}
       </div>
       {isUser && (
         <div className="w-8 h-8 rounded-xl bg-secondary flex items-center justify-center flex-shrink-0 mt-1">
@@ -507,20 +536,29 @@ const ChatView = ({ quickMessage, onQuickMessageConsumed }: ChatViewProps) => {
             summary: m.content || `I found ${(m.rows_ret ?? 0).toLocaleString()} rows.`,
             columns: [], rows: [],
             rowsReturned: m.rows_ret ?? 0,
+            kpiCoverage: (m as { kpi_coverage?: KpiCoverageInfo }).kpi_coverage,
           });
         } else if (m.intent === "chart") {
           // Chart full data isn't in messages table; show a text summary
           restored.push({
             id: counter++, role: "ai", kind: "text",
             content: m.content || "📊 Chart generated (view in Charts tab)",
+            kpiCoverage: (m as { kpi_coverage?: KpiCoverageInfo }).kpi_coverage,
           });
         } else if (m.intent === "insights") {
           restored.push({
             id: counter++, role: "ai", kind: "text",
             content: m.content || "💡 Insights discovered (view in Insights tab)",
+            kpiCoverage: (m as { kpi_coverage?: KpiCoverageInfo }).kpi_coverage,
           });
         } else {
-          restored.push({ id: counter++, role: "ai", kind: "text", content: m.content });
+          restored.push({
+            id: counter++,
+            role: "ai",
+            kind: "text",
+            content: m.content,
+            kpiCoverage: (m as { kpi_coverage?: KpiCoverageInfo }).kpi_coverage,
+          });
         }
       }
       setMessages(restored);
@@ -623,7 +661,7 @@ const ChatView = ({ quickMessage, onQuickMessageConsumed }: ChatViewProps) => {
             <div className="w-8 h-8 rounded-xl bg-primary/20 flex items-center justify-center flex-shrink-0 mt-1">
               <Bot size={16} className="text-primary" />
             </div>
-            <div className="glass-card text-foreground rounded-bl-md px-5 py-3.5 flex items-center gap-3 text-sm text-muted-foreground">
+            <div className="glass-card rounded-bl-md px-5 py-3.5 flex items-center gap-3 text-sm text-muted-foreground">
               <Loader2 size={14} className="animate-spin" />
               {progressStep >= 0 ? (
                 <div className="flex items-center gap-1.5 text-xs">

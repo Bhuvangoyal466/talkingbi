@@ -83,10 +83,17 @@ def _make_voice_answer(result: dict) -> str:
     if not isinstance(result, dict):
         return str(result)
 
+    kpi_summary = ""
+    if isinstance(result.get("kpi_coverage"), dict):
+        kpi_summary = result["kpi_coverage"].get("summary", "") or ""
+
     for key in ("answer", "response", "summary", "error"):
         value = result.get(key)
         if value:
-            return str(value)
+            text = str(value)
+            if kpi_summary and kpi_summary not in text:
+                return f"{text} {kpi_summary}".strip()
+            return text
 
     if result.get("type") in ("sql", "sql_result"):
         rows = result.get("rows_returned", 0)
@@ -98,9 +105,15 @@ def _make_voice_answer(result: dict) -> str:
 
     if result.get("type") == "insights":
         total = len(result.get("insights", []))
-        return f"I found {total} insights from your data."
+        answer = f"I found {total} insights from your data."
+        if kpi_summary:
+            return f"{answer} {kpi_summary}".strip()
+        return answer
 
-    return "I processed your request."
+    answer = "I processed your request."
+    if kpi_summary:
+        return f"{answer} {kpi_summary}".strip()
+    return answer
 
 
 def build_voice_summary(result: dict) -> str:

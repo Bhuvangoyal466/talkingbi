@@ -6,8 +6,9 @@ import {
 } from "lucide-react";
 import { generateChart, getSessionCharts, getChartSuggestions } from "@/lib/api";
 import { useSession } from "@/hooks/use-session";
-import type { ChartResult, ChartData } from "@/types/api";
+import type { ChartResult, ChartData, KpiCoverageInfo } from "@/types/api";
 import InteractiveChart, { MiniChart } from "@/components/InteractiveChart";
+import KpiCoverageCard from "@/components/KpiCoverageCard";
 import {
   Collapsible,
   CollapsibleContent,
@@ -47,6 +48,7 @@ interface HistoryItem {
   title: string;
   dataPoints: number;
   code?: string;
+  kpiCoverage?: KpiCoverageInfo;
 }
 
 // ─── Empty state ──────────────────────────────────────────────────────────────
@@ -165,6 +167,7 @@ function LiveChartPanel() {
           title: c.title || c.chart_type,
           dataPoints: c.data_points,
           code: undefined,
+          kpiCoverage: c.kpi_coverage,
         }));
       if (items.length > 0) {
         setHistory(items);
@@ -177,6 +180,7 @@ function LiveChartPanel() {
           data_points: first.dataPoints,
           code: "",
           chart_data: first.chartData,
+          kpi_coverage: first.kpiCoverage,
         } as ChartResult);
       }
     }).catch(() => {});
@@ -237,6 +241,7 @@ function LiveChartPanel() {
             title: res.title,
             dataPoints: res.data_points,
             code: res.code,
+            kpiCoverage: res.kpi_coverage,
           },
           ...prev.slice(0, 7),
         ]);
@@ -331,6 +336,12 @@ function LiveChartPanel() {
 
           <InteractiveChart chartData={current.chart_data} chartType={current.chart_type} height={340} />
 
+          {current.kpi_coverage && (
+            <div className="pt-2">
+              <KpiCoverageCard coverage={current.kpi_coverage} />
+            </div>
+          )}
+
           {current.code && (
             <Collapsible open={codeOpen} onOpenChange={setCodeOpen}>
               <CollapsibleTrigger className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors mt-1">
@@ -356,6 +367,9 @@ function LiveChartPanel() {
               </div>
               <img src={`data:image/png;base64,${current.image_base64}`} alt={current.title}
                 className="rounded-xl max-w-full border border-border/30" />
+              {current.kpi_coverage && (
+                <KpiCoverageCard coverage={current.kpi_coverage} />
+              )}
             </div>
           ) : (
             <EmptyState suggestions={suggestions} onSuggestionClick={handleSuggestionClick} loading={loading} />
@@ -416,6 +430,9 @@ function LiveChartPanel() {
                 <span>Y: <span className="text-foreground/70">{historyItem.chartData.y_axis_label}</span></span>
               </div>
               <InteractiveChart chartData={historyItem.chartData} chartType={historyItem.chartType} height={360} />
+              {historyItem.kpiCoverage && (
+                <KpiCoverageCard coverage={historyItem.kpiCoverage} />
+              )}
               {historyItem.code && (
                 <Collapsible>
                   <CollapsibleTrigger className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors">

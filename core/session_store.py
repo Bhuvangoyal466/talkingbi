@@ -40,7 +40,8 @@ class SessionStore:
     # ── Schema ────────────────────────────────────────────────────────────────
 
     def _create_tables(self):
-        self._conn.executescript("""
+        self._conn.executescript(
+            """
         CREATE TABLE IF NOT EXISTS messages (
             id        INTEGER PRIMARY KEY AUTOINCREMENT,
             ts        REAL    NOT NULL,
@@ -48,7 +49,8 @@ class SessionStore:
             content   TEXT    NOT NULL,
             intent    TEXT,                      -- sql_query | chart | insight | …
             sql       TEXT,                      -- generated SQL if any
-            rows_ret  INTEGER
+            rows_ret  INTEGER,
+            kpi_coverage TEXT                    -- JSON
         );
         CREATE INDEX IF NOT EXISTS idx_messages_ts ON messages(ts);
 
@@ -75,7 +77,8 @@ class SessionStore:
             data_points INTEGER,
             chart_data  TEXT,                    -- JSON
             code        TEXT,
-            justification TEXT
+            justification TEXT,
+            kpi_coverage TEXT                    -- JSON
         );
         CREATE INDEX IF NOT EXISTS idx_charts_ts ON charts(ts);
 
@@ -87,17 +90,44 @@ class SessionStore:
             rows        INTEGER,
             columns     TEXT                     -- JSON list
         );
-        """)
+        """
+        )
         self._conn.commit()
+        self._ensure_column("messages", "kpi_coverage", "TEXT")
+        self._ensure_column("charts", "kpi_coverage", "TEXT")
+
+    def _ensure_column(self, table: str, column: str, definition: str):
+        existing = {
+            row[1]
+            for row in self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column not in existing:
+            self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            self._conn.commit()
 
     # ── Messages ──────────────────────────────────────────────────────────────
 
-    def add_message(self, role: str, content: str,
-                    intent: str = None, sql: str = None, rows_ret: int = None):
+    def add_message(
+        self,
+        role: str,
+        content: str,
+        intent: str = None,
+        sql: str = None,
+        rows_ret: int = None,
+        kpi_coverage: dict | None = None,
+    ):
         conn = self._get_conn()
         conn.execute(
-            "INSERT INTO messages(ts, role, content, intent, sql, rows_ret) VALUES (?,?,?,?,?,?)",
-            (time.time(), role, content[:4000], intent, sql, rows_ret),
+            "INSERT INTO messages(ts, role, content, intent, sql, rows_ret, kpi_coverage) VALUES (?,?,?,?,?,?,?)",
+            (
+                time.time(),
+                role,
+                content[:4000],
+                intent,
+                sql,
+                rows_ret,
+                json.dumps(kpi_coverage) if kpi_coverage else None,
+            ),
         )
         conn.commit()
 
@@ -108,7 +138,16 @@ class SessionStore:
         rows = conn.execute(
             "SELECT * FROM messages ORDER BY ts DESC LIMIT ?", (limit,)
         ).fetchall()
-        return [dict(r) for r in reversed(rows)]
+        result = []
+        for r in reversed(rows):
+            d = dict(r)
+            if d.get("kpi_coverage"):
+                try:
+                    d["kpi_coverage"] = json.loads(d["kpi_coverage"])
+                except Exception:
+                    d["kpi_coverage"] = None
+            result.append(d)
+        return result
 
     # ── Insights ─────────────────────────────────────────────────────────────
 
@@ -147,8 +186,8 @@ class SessionStore:
     def add_chart(self, query: str, result: dict):
         conn = self._get_conn()
         conn.execute(
-            """INSERT INTO charts(ts,title,chart_type,query,data_points,chart_data,code,justification)
-               VALUES (?,?,?,?,?,?,?,?)""",
+            """INSERT INTO charts(ts,title,chart_type,query,data_points,chart_data,code,justification,kpi_coverage)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
             (
                 time.time(),
                 result.get("title", ""),
@@ -158,6 +197,11 @@ class SessionStore:
                 json.dumps(result.get("chart_data", {})),
                 result.get("code", ""),
                 result.get("justification", ""),
+                (
+                    json.dumps(result.get("kpi_coverage"))
+                    if result.get("kpi_coverage")
+                    else None
+                ),
             ),
         )
         conn.commit()
@@ -167,7 +211,7 @@ class SessionStore:
             return []
         conn = self._get_conn()
         rows = conn.execute(
-            "SELECT id,ts,title,chart_type,query,data_points,chart_data,justification FROM charts ORDER BY ts DESC LIMIT ?",
+            "SELECT id,ts,title,chart_type,query,data_points,chart_data,justification,kpi_coverage FROM charts ORDER BY ts DESC LIMIT ?",
             (limit,),
         ).fetchall()
         result = []
@@ -178,6 +222,11 @@ class SessionStore:
                     d["chart_data"] = json.loads(d["chart_data"])
                 except Exception:
                     d["chart_data"] = None
+            if d.get("kpi_coverage"):
+                try:
+                    d["kpi_coverage"] = json.loads(d["kpi_coverage"])
+                except Exception:
+                    d["kpi_coverage"] = None
             result.append(d)
         return result
 
@@ -195,20 +244,26 @@ class SessionStore:
         if self._conn is None and not self.db_path.exists():
             return []
         conn = self._get_conn()
-        rows = conn.execute(
-            "SELECT * FROM uploads ORDER BY ts DESC"
-        ).fetchall()
+        rows = conn.execute("SELECT * FROM uploads ORDER BY ts DESC").fetchall()
         return [dict(r) for r in rows]
 
     # ── Summary ──────────────────────────────────────────────────────────────
 
     def summary(self) -> dict:
         if self._conn is None and not self.db_path.exists():
-            return {"session_id": self.session_id, "db_path": str(self.db_path),
-                    "messages": 0, "insights": 0, "charts": 0, "uploads": 0}
+            return {
+                "session_id": self.session_id,
+                "db_path": str(self.db_path),
+                "messages": 0,
+                "insights": 0,
+                "charts": 0,
+                "uploads": 0,
+            }
         conn = self._get_conn()
+
         def _count(table):
             return conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+
         return {
             "session_id": self.session_id,
             "db_path": str(self.db_path),

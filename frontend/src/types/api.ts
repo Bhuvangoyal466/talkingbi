@@ -56,6 +56,7 @@ export interface SessionMessage {
   intent: string | null;
   sql: string | null;
   rows_ret: number | null;
+  kpi_coverage?: KpiCoverageInfo | null;
 }
 
 export interface SessionChart {
@@ -67,6 +68,7 @@ export interface SessionChart {
   data_points: number;
   chart_data: ChartData | null;
   justification: string | null;
+  kpi_coverage?: KpiCoverageInfo | null;
 }
 
 export interface HealthResponse {
@@ -104,6 +106,19 @@ export interface Insight {
   insight?: string;
 }
 
+export interface KpiCoverageInfo {
+  requested_kpis: string[];
+  available_kpis: string[];
+  covered_kpis: string[];
+  missing_kpis: string[];
+  coverage_count: number;
+  coverage_total: number;
+  coverage_percent: number;
+  coverage_basis: string;
+  status: string;
+  summary: string;
+}
+
 // ─── Chat response union ──────────────────────────────────────────────────────
 
 export interface SQLResultResponse {
@@ -113,6 +128,7 @@ export interface SQLResultResponse {
   data: { columns: string[]; rows: unknown[][] };
   rows_returned: number;
   iterations?: number;
+  kpi_coverage?: KpiCoverageInfo;
 }
 
 // ─── Chart data structure ─────────────────────────────────────────────────────
@@ -139,6 +155,7 @@ export interface ChartResultResponse {
   code: string;
   justification?: string;
   chart_data?: ChartData;
+  kpi_coverage?: KpiCoverageInfo;
 }
 
 export interface InsightsResponse {
@@ -147,6 +164,7 @@ export interface InsightsResponse {
   insights: Insight[];
   summary: string;
   total_insights: number;
+  kpi_coverage?: KpiCoverageInfo;
 }
 
 export interface DataPrepResponse {
@@ -158,6 +176,7 @@ export interface DataPrepResponse {
   preview: Record<string, unknown>[];
   turns?: number;
   error?: string;
+  kpi_coverage?: KpiCoverageInfo;
 }
 
 export interface HybridResponse {
@@ -165,11 +184,13 @@ export interface HybridResponse {
   data?: SQLResultResponse;
   chart?: ChartResultResponse;
   insights?: string[];
+  kpi_coverage?: KpiCoverageInfo;
 }
 
 export interface ConversationResponse {
   type: "conversation";
   response: string;
+  kpi_coverage?: KpiCoverageInfo;
 }
 
 export interface VoiceAnalysisResponse {

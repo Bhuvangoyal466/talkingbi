@@ -15,6 +15,7 @@ from core.llm_client import llm
 from core.logger import logger
 from core.config import settings
 from core.exceptions import DatabaseConnectionError, FileLoadError
+from core.kpi_service import build_kpi_coverage
 from core.session_store import SessionStore
 from orchestrator.router import QueryRouter, QueryIntent
 from layers.data_access.schema_rep import SchemaRepresentation
@@ -352,6 +353,8 @@ class TalkingBIPipeline:
         else:
             result = self._handle_conversation(message)
 
+        result = self._attach_kpi_coverage(message, result)
+
         # ── Persist result to session store ──────────────────────────────────
         rtype = result.get("type", "")
         # Build a human-readable summary instead of dumping the raw dict
@@ -382,6 +385,7 @@ class TalkingBIPipeline:
             intent=rtype,
             sql=result.get("sql"),
             rows_ret=result.get("rows_returned"),
+            kpi_coverage=result.get("kpi_coverage"),
         )
         if rtype == "insights" and result.get("insights"):
             self.store.add_insight_run(
@@ -393,6 +397,19 @@ class TalkingBIPipeline:
             self.store.add_chart(message, result)
 
         self.session_history.append({"role": "assistant", "content": str(result)[:500]})
+        return result
+
+    def _attach_kpi_coverage(self, message: str, result: dict) -> dict:
+        if not isinstance(result, dict) or result.get("type") == "error":
+            return result
+
+        chart_data = result.get("chart_data")
+        if not chart_data and result.get("type") == "hybrid":
+            chart_data = (result.get("chart") or {}).get("chart_data")
+
+        coverage = build_kpi_coverage(message, self.current_df, chart_data)
+        if coverage.get("available_kpis") or coverage.get("requested_kpis"):
+            result["kpi_coverage"] = coverage
         return result
 
     # ── LAYER HANDLERS ────────────────────────────────────────────────────────
@@ -428,7 +445,7 @@ class TalkingBIPipeline:
         result = engine.query(message)
         if result.get("success"):
             rows = result["result"].get("rows", [])
-            return {
+            sql_result = {
                 "type": "sql_result",
                 "sql": result["sql"],
                 "answer": result.get("answer", ""),
@@ -436,6 +453,7 @@ class TalkingBIPipeline:
                 "rows_returned": len(rows) if rows else 0,
                 "iterations": result.get("iterations", 1),
             }
+            return self._attach_kpi_coverage(message, sql_result)
 
         fallback = self._fallback_simple_aggregate_query(
             message, reason="post_llm_failure"
@@ -692,7 +710,7 @@ Return JSON: {{"columns": {{"col_name": "description"}}, "goal": "transformation
             chart = self.chart_gen.generate(extracted, chart_type)
 
             if chart.get("success"):
-                return {
+                result = {
                     "type": "chart",
                     "image_base64": chart["image_base64"],
                     "chart_type": chart["chart_type"],
@@ -707,6 +725,7 @@ Return JSON: {{"columns": {{"col_name": "description"}}, "goal": "transformation
                         "title": extracted.get("title", ""),
                     },
                 }
+                return self._attach_kpi_coverage(message, result)
             return {
                 "type": "error",
                 "error": f"Chart generation failed: {chart.get('error')}",
@@ -757,13 +776,14 @@ Return JSON: {{"columns": {{"col_name": "description"}}, "goal": "transformation
             evaluated = self.evaluator.evaluate(insights)
             summary = self.summary_synth.synthesize(evaluated, goal)
 
-            return {
+            result = {
                 "type": "insights",
                 "goal": goal.get("refined_goal"),
                 "insights": evaluated,
                 "summary": summary,
                 "total_insights": len(evaluated),
             }
+            return self._attach_kpi_coverage(message, result)
         except Exception as e:
             logger.error(f"_handle_insight error: {e}", exc_info=True)
             return {"type": "error", "error": f"Insight generation error: {e}"}
@@ -798,7 +818,7 @@ Return JSON: {{"columns": {{"col_name": "description"}}, "goal": "transformation
 
             responses["insights"] = [i["insight"] for i in top_insights]
 
-        return responses
+        return self._attach_kpi_coverage(message, responses)
 
     def _handle_conversation(self, message: str) -> dict:
         """Handle general conversation with context awareness."""
@@ -865,4 +885,5 @@ guide them to upload data or connect a database."""
         except Exception as e:
             response = f"I'm here to help with your data analysis. (LLM error: {e})"
 
-        return {"type": "conversation", "response": response}
+        result = {"type": "conversation", "response": response}
+        return self._attach_kpi_coverage(message, result)
